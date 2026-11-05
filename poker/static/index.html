@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Poker</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#0b5d3b;color:#fff;margin:0;padding:12px}
+  .card{display:inline-block;background:#fff;color:#111;border-radius:6px;padding:6px 8px;margin:2px;font-weight:700}
+  .card.red{color:#c0392b}
+  .p{background:#0003;border-radius:8px;padding:8px;margin:6px 0}
+  .p.cur{outline:2px solid #f1c40f}
+  button{font-size:16px;padding:10px 14px;margin:4px;border-radius:8px;border:0}
+  input{font-size:16px;padding:8px;border-radius:8px;border:0}
+  #err{color:#ffb3b3}
+</style>
+</head>
+<body>
+<div id="join">
+  <h2>Покер</h2>
+  <input id="name" placeholder="Ваше ім'я">
+  <button onclick="join()">Зайти за стіл</button>
+</div>
+<div id="game" hidden>
+  <div id="info"></div><div id="board"></div>
+  <div id="players"></div>
+  <div id="actions"></div>
+  <button id="start" hidden onclick="send({type:'start'})">Нова роздача (host)</button>
+  <div id="err"></div>
+</div>
+<script>
+const q = new URLSearchParams(location.search);
+let ws, pid = localStorage.getItem('pid:' + q.get('room'));
+function send(o){ ws.send(JSON.stringify(o)); }
+function join(){
+  const name = document.getElementById('name').value || 'Player';
+  ws = new WebSocket((location.protocol==='https:'?'wss://':'ws://') + location.host + '/ws' + (q.get('host') ? '?host=' + q.get('host') : ''));
+  ws.onopen = () => send({type:'join', name, pid});
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.type === 'joined'){ pid = m.pid; localStorage.setItem('pid:' + q.get('room'), pid);
+      document.getElementById('join').hidden = true; document.getElementById('game').hidden = false; }
+    if (m.type === 'error') document.getElementById('err').textContent = m.message;
+    if (m.type === 'state'){ document.getElementById('err').textContent = ''; render(m.state, m.is_host); }
+  };
+}
+const card = c => { const red = 'dh'.includes(c[1]); return `<span class="card ${red?'red':''}">${c==='??'?'🂠':c[0]+({c:'♣',d:'♦',h:'♥',s:'♠'}[c[1]])}</span>`; };
+function render(s, isHost){
+  document.getElementById('info').textContent = `Роздача #${s.hand_no} · ${s.phase} · банк ${s.pot}`;
+  document.getElementById('board').innerHTML = s.board.map(card).join('');
+  document.getElementById('players').innerHTML = s.players.map(p =>
+    `<div class="p ${p.is_current?'cur':''}"><b>${p.name}${p.is_dealer?' (D)':''}${p.id===s.you?' ← ви':''}</b>
+     · стек ${p.stack} · ставка ${p.bet}${p.folded?' · fold':''}${p.all_in?' · all-in':''}<br>${p.cards.map(card).join('')}</div>`).join('');
+  const L = s.legal, a = document.getElementById('actions'); a.innerHTML = '';
+  if (L && L.fold){
+    a.innerHTML += `<button onclick="send({type:'action',action:'fold'})">Fold</button>`;
+    if (L.check) a.innerHTML += `<button onclick="send({type:'action',action:'check'})">Check</button>`;
+    if (L.call) a.innerHTML += `<button onclick="send({type:'action',action:'call'})">Call ${L.call}</button>`;
+    if (L.raise) a.innerHTML += `<input id="amt" type="number" min="${L.raise.min}" max="${L.raise.max}" value="${L.raise.min}" style="width:90px">
+      <button onclick="send({type:'action',action:'raise',amount:+amt.value})">Raise to</button>
+      <button onclick="send({type:'action',action:'allin'})">All-in</button>`;
+  }
+  if (s.result) a.innerHTML += `<div class="p">Переможець: ${s.result.winners.map(w => (s.players.find(p=>p.id===w.id)||{}).name + ' +' + w.amount + (w.hand?' ('+w.hand+')':'')).join(', ')}</div>`;
+  document.getElementById('start').hidden = !(isHost && s.phase === 'waiting');
+}
+</script>
+</body>
+</html>
